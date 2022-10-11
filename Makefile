@@ -17,6 +17,6 @@ all: test_allocator
  
 test_allocator: $(OBJS)
 	gcc $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) $^ $(LDLIBS) -o $@
- 
+	rm -f $(OBJS) $(DEPS)
 clean:
 	rm -f $(OBJS) $(DEPS) test_allocator
