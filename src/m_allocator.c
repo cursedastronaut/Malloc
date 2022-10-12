@@ -4,25 +4,26 @@
 #include <stdbool.h>
 #include "metadata.h"
 //It's day 1 and I truly wanna give up.
+//It's day 4, and despite having made some significant advancement,
+//partially with the help of some classmate, I still wish to give up.
 static Metadata* metadata = NULL;
 
-void* malloc_hook(size_t size, const void* caller)            { return m_malloc(size); }
-void* realloc_hook(void* ptr, size_t size, const void* caller){ return m_realloc(ptr, size); }
-void  free_hook(void* ptr, const void* caller)                { return m_free(ptr); }
-
+static int gHooked = 0;
+extern void *__libc_malloc(size_t);
+extern void __libc_free(void*);
+extern void *__libc_calloc(size_t, size_t);
+extern void *__libc_realloc(void*, size_t);
+ 
+void* malloc(size_t size)             { return gHooked ? m_malloc(size)       : __libc_malloc(size); }
+void  free(void* ptr)                 {        gHooked ? m_free(ptr)          : __libc_free(ptr); }
+void* calloc(size_t num, size_t size) { return gHooked ? m_calloc(num, size)  : __libc_calloc(num, size); }
+void* realloc(void* ptr, size_t size) { return gHooked ? m_realloc(ptr, size) : __libc_realloc(ptr, size); }
+ 
 void m_setup_hooks(void)
 {
-   __malloc_hook = malloc_hook;
-   __realloc_hook = realloc_hook;
-   __free_hook = free_hook;
+    gHooked = 1;
 }
-#define COLOR_RED     "\x1b[31m"
-#define COLOR_GREEN   "\x1b[32m"
-#define COLOR_YELLOW  "\x1b[33m"
-#define COLOR_BLUE    "\x1b[34m"
-#define COLOR_MAGENTA "\x1b[35m"
-#define COLOR_CYAN    "\x1b[36m"
-#define COLOR_RESET   "\x1b[0m" 
+
 void m_show_info(void)
 {
     printf(COLOR_YELLOW "Show the blocks (m_show_info):\n");
@@ -44,9 +45,9 @@ void m_show_info(void)
 
 Metadata* split_block(Metadata* m, size_t size)
 {
+    void* maddress = m;
     //m->size = size;
-    char* temp = m + sizeof(Metadata) + size;
-    Metadata* unusedData = temp;
+    Metadata* unusedData = maddress + sizeof(Metadata) + size;
     unusedData->size = m->size - size - sizeof(Metadata);
     unusedData->free = true;
     unusedData->ptr = unusedData + 1;
@@ -221,15 +222,17 @@ void m_free(void* ptr)
     Metadata* prev = NULL;
     for (Metadata* m = metadata; m != NULL; m = m->next)
     {
-        if (m != NULL && m->next != NULL)
+        if (m->ptr == ptr)
         {
             m->free = true;
-            Metadata* next = m->next;
-            if (m->free && next->free)
-                fusion_block(m, next);
-            if (prev && m->free && prev->free)
+            if (prev && prev->free)
                 fusion_block(prev, m);
 
+            Metadata* next = m->next;
+            if (next && next->free)
+                fusion_block(m, next);
+
+            break;
         }
 
         prev = m;
