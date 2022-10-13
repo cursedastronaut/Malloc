@@ -26,8 +26,10 @@ void m_setup_hooks(void)
 
 void m_show_info(void)
 {
+    //Skip the first block caused by printf (It is irrelevant).
+    Metadata* m = metadata;
     printf(COLOR_YELLOW "Show the blocks (m_show_info):\n");
-    for (Metadata* m = metadata; m != NULL; m = m->next)
+    for (m = m->next; m != NULL; m = m->next)
     {
         printf(COLOR_GREEN "Adress : %p", m);
         printf(COLOR_RESET " | ");
@@ -109,6 +111,7 @@ void* copy_value(void* newLocation, void* oldLocation)
 
 void* m_malloc(size_t size)
 {
+    for(; size % 8 != 0; size ++);
     Metadata* data = get_free_block(size);
     if (data != NULL)
     {
@@ -231,7 +234,8 @@ void m_free(void* ptr)
             Metadata* next = m->next;
             if (next && next->free)
                 fusion_block(m, next);
-
+            if (next == NULL)
+                sbrk(-(m->size + sizeof(Metadata)));
             break;
         }
 
