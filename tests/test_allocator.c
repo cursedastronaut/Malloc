@@ -18,7 +18,7 @@ void test_alloc()
     "2 - Compares Calloc and Malloc variable results.\n"
     "(Useful to test the calloc function)\n\n"
     "3 - Reduce break size after freeing last block\n"
-    "(Useful to test the break optimization of the free function)"
+    "(Useful to test the break optimization of the free function)\n"
     "4 - Your own code.\n");
     int choice = 0;
     scanf("%d", &choice);
@@ -90,7 +90,25 @@ void test_alloc()
             }
             break;
         }
+        case 3:
+        {
+            printf("Explanation: One block will be allocated, then freed. We will see if the break moves.");
+            int *test3 = m_malloc(sizeof(int));
+            printf("Break postion: %p\n", sbrk(0));
+            free(test3);
+            printf("Break postion: %p\n", sbrk(0));
+            break;
+        }
 
+        case 4:
+        {
+            char *test4 = m_malloc(16 * sizeof(char));
+            char *test5 = m_malloc(48 * sizeof(char));
+            m_show_info();
+            m_realloc(test4, 2 * sizeof(char));
+            m_show_info();
+            break;
+        }
         default:
             break;
     }

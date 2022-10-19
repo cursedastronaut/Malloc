@@ -3,17 +3,21 @@
 #include <m_allocator.h>
 #include <stdbool.h>
 #include "metadata.h"
+
+#define DEBUG true
 //It's day 1 and I truly wanna give up.
 //It's day 4, and despite having made some significant advancement,
 //partially with the help of some classmate, I still wish to give up.
+//It's one day before you receive this! I'm working on making it better.
 static Metadata* metadata = NULL;
 
+//Hooks
 static int gHooked = 0;
 extern void *__libc_malloc(size_t);
 extern void __libc_free(void*);
 extern void *__libc_calloc(size_t, size_t);
 extern void *__libc_realloc(void*, size_t);
- 
+
 void* malloc(size_t size)             { return gHooked ? m_malloc(size)       : __libc_malloc(size); }
 void  free(void* ptr)                 {        gHooked ? m_free(ptr)          : __libc_free(ptr); }
 void* calloc(size_t num, size_t size) { return gHooked ? m_calloc(num, size)  : __libc_calloc(num, size); }
@@ -24,12 +28,15 @@ void m_setup_hooks(void)
     gHooked = 1;
 }
 
+/* M SHOW INFO - Shows useful debugging informations about the blocks.*/
 void m_show_info(void)
 {
-    //Skip the first block caused by printf (It is irrelevant).
-    Metadata* m = metadata;
+    //Skips the first block caused by printf (It is irrelevant).
+    Metadata* m = metadata; 
     printf(COLOR_YELLOW "Show the blocks (m_show_info):\n");
-    for (m = m->next; m != NULL; m = m->next)
+    if (DEBUG == true) //Do not enable for your test! It justs skips the first if you used printf.
+        m = m->next;
+    for (; m != NULL; m = m->next)
     {
         printf(COLOR_GREEN "Adress : %p", m);
         printf(COLOR_RESET " | ");
@@ -45,6 +52,7 @@ void m_show_info(void)
     }
 }
 
+/* SPLIT BLOCK - Split blocks when called */
 Metadata* split_block(Metadata* m, size_t size)
 {
     void* maddress = m;
@@ -58,12 +66,13 @@ Metadata* split_block(Metadata* m, size_t size)
     return m;
 }
 
+/* FUSION BLOCK - Fusions two blocks (m1 and m2) when called*/
 void fusion_block(Metadata* m1, Metadata* m2)
 {
     m1->size += m2->size + sizeof(Metadata);
     m1->next = m2->next;
 }
-
+/* AUTO FUSION BLOCK - Advanced fusion block */
 int auto_fusion_block(Metadata* prev)
 {
     Metadata* block = prev->next;
@@ -85,21 +94,7 @@ int auto_fusion_block(Metadata* prev)
         }
     return 0;
 }
-
-Metadata* get_free_block(size_t size)
-{
-    for (Metadata* m = metadata; m != NULL; m = m->next)
-        if (m->free)
-        {
-            if (m->size == size)
-            {return m;}
-            else if (m->size > size)
-            {return split_block(m, size);}
-        }
-            
-    return NULL; 
-    
-}
+/* COPY VALUE - Copies the values of the oldLocation to the newLocation*/
 void* copy_value(void* newLocation, void* oldLocation)
 {
     int* newVal = newLocation;
@@ -107,20 +102,53 @@ void* copy_value(void* newLocation, void* oldLocation)
     *newVal = *oldVal;
     return newVal;
 }
-
-
+/*Realloc processing.*/
+Metadata* treal(Metadata* data, Metadata* data2, size_t size, void* ptr)
+{
+            if (data2->size == size)
+                return data->ptr;
+            if (data2->size > size) {
+                if (split_block(data2, size) == 0)
+                    return copy_value(m_malloc(size), ptr);
+                copy_value(data->ptr, ptr);
+                if (data2->next == NULL)
+                    m_free(data->next->ptr); //Must not be data2->ptr
+                return data->ptr;
+            }
+            data->next->free = true;
+            return copy_value(m_malloc(size), ptr);
+}
+/* GET FREE BLOCK - Searches for free blocks of the right size or below, and returns their adress*/
+Metadata* get_free_block(size_t size)
+{
+    for (Metadata* m = metadata; m != NULL; m = m->next)
+    {
+        if (m->free)
+        {
+            if (m->size == size)
+                return m;
+            else if (m->size > size)
+                return split_block(m, size);
+        }
+    }
+            
+    return NULL; 
+    
+}
+/* MALLOC - Allocates memory. */
 void* m_malloc(size_t size)
 {
+    //Puts the size at a multiple of 8.
     for(; size % 8 != 0; size ++);
+    //Searches for free blocks of the correct size or below.
     Metadata* data = get_free_block(size);
-    if (data != NULL)
+    if (data != NULL) //It found a free block with the right size or lower!
     {
-        //Metadata* data = sbrk(sizeof(Metadata));
         void* new = data->ptr;
         data->free = false;
         return new;
     }
-    else
+    else //It didn't find a free block with the right size.
     {
         Metadata* data = sbrk(sizeof(Metadata));
         void* new = sbrk(size);
@@ -128,17 +156,17 @@ void* m_malloc(size_t size)
         data->size = size;
         data->free = false;
 
-        if (metadata == NULL)
+        if (metadata == NULL) //If it's the first block.
         {
             metadata = data;
         }
-        else
-            for (Metadata* m = metadata; m != NULL; m = m->next)
-            {
-                if (m->next == NULL)
+        else 
+            for (Metadata* m = metadata; m != NULL; m = m->next)    //Searches for the block
+            {                                                       //before the one we are
+                if (m->next == NULL)                                //allocating right now.
                 {
-                    m->next = data;
-                    break;
+                    m->next = data;                                 //Says the current block
+                    break;                                          //is the next of the previous one.
                 }
             }
         
@@ -146,64 +174,75 @@ void* m_malloc(size_t size)
     }
     
 }
- 
+
+/* REALLOC - Changes the size of a memory block previously allocated */ 
 void* m_realloc(void* ptr, size_t size)
 {
-    if (size == 0) {
+    for(; size % 8 != 0; size ++);
+    if (size == 0)  //Just in case a developer is a bit dumb (hi future me)
+    {
         m_free(ptr);
         return NULL;
     }
 
-    if (ptr == NULL)
+    if (ptr == NULL) //Saving the user if they put NULL as ptr.
         return m_malloc(size);
 
     Metadata* data = NULL;
-    for (Metadata* m = metadata; m != NULL; m = m->next)
+    for (Metadata* m = metadata; m != NULL; m = m->next) //Searching our block
         if (m->next != NULL)
-            if (m->next->ptr == ptr) {
-                data = m;
+            if (m->next->ptr == ptr) 
+            {
+                data = m; //Data = PREVIOUS ; Data->next = CURRENT BLOCK ; Data->next->next = NEXT BLOCK
                 break;
             }
-    if (data == NULL)
+    if (data == NULL) //If your pointer points nowhere.
         return NULL;
-
-    switch (auto_fusion_block(data)) {
+    if (size < data->next->size) // If you're trying to reduce the size of the block
+    {
+        if (data->next->next != NULL)   //If there is a block after this one
+        {                               //We split this block so the other part is free.
+            Metadata* unusedData = data->next + size;
+            unusedData->free = true;
+            unusedData->next = data->next->next;
+            data->next->next = unusedData;
+            unusedData->size = data->next->size - size;
+            unusedData->ptr = unusedData + sizeof(Metadata*);
+            data->next->size = size;
+            return data;
+        }
+        else
+        {
+            data->next->size = size;
+            return data;
+        }
+    }
+    if (data->next->next == NULL) //If there is no block after this one
+    {
+        data->next->size = size;
+        return ptr;
+    }
+    else
+    {
+        switch (auto_fusion_block(data))
+        {
         case 1:
-            if (data->next->size == size)
-                return data->ptr;
-            if (data->next->size > size) {
-                if (split_block(data->next, size) == 0)
-                    return copy_value(m_malloc(size), ptr);
-                copy_value(data->ptr, ptr);
-                if (data->next->next == NULL)
-                    m_free(data->next->ptr);
-                return data->ptr;
-            }
-            data->next->free = true;
-            return copy_value(m_malloc(size), ptr);
+            return treal(data, data->next, size, &ptr);
             
         case 2:
-            if (data->size == size)
-                return data->ptr;
-            if (data->size > size) {
-                if (split_block(data, size) == 0)
-                    return copy_value(m_malloc(size), ptr);
-                copy_value(data->ptr, ptr);
-                if (data->next->next == NULL)
-                    m_free(data->next->ptr);
-                return data->ptr;
-            }
-            data->free = true;
-            return copy_value(m_malloc(size), ptr);
+            return treal(data, data, size, &ptr);
 
         case 0:
             data->next->free = true;
             return copy_value(m_malloc(size), ptr);
+        }
     }
+    
 
     return NULL;
 }
- 
+
+/* CALLOC - Allocates memory, and sets everything to zero.*/
 void* m_calloc(size_t nb, size_t size)
 {
     char *ptr;
@@ -212,29 +251,30 @@ void* m_calloc(size_t nb, size_t size)
     if ((ptr = m_malloc(size * nb)) == NULL)
         return (NULL);
     dat = 0;
-    while (dat < size)
+    //Actually sets the values to zeros
+    for (;dat < size; dat ++)
     {
         ptr[dat] = 0;
-        ++dat;
     }
     return (ptr);
 }
  
+/*FREE - Frees a previously allocated block */
 void m_free(void* ptr)
 {
     Metadata* prev = NULL;
-    for (Metadata* m = metadata; m != NULL; m = m->next)
+    for (Metadata* m = metadata; m != NULL; m = m->next) //Searches the block at the adress ptr
     {
-        if (m->ptr == ptr)
-        {
+        if (m->ptr == ptr)  //Verifies the block has the adress we are searching for
+        {                   //Forgetting this results in all the blocks being freed.
             m->free = true;
-            if (prev && prev->free)
-                fusion_block(prev, m);
+            if (prev && prev->free)     //If there is a previous block that is free,
+                fusion_block(prev, m);  //we fusion them. fusion_block(previous, current)
 
-            Metadata* next = m->next;
-            if (next && next->free)
+            Metadata* next = m->next;   //Helps with clarity.
+            if (next && next->free)     //If the next block is free, we fusion them.
                 fusion_block(m, next);
-            if (next == NULL)
+            if (next == NULL)           //If there is no block after, we reduce the brk size.
                 sbrk(-(m->size + sizeof(Metadata)));
             break;
         }
